@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HTML Source Viewer</title>
+  <style>
+    body { font-family: monospace; background:#f7f7f7; margin:0; padding:1rem; }
+    h1 { font-family: sans-serif; }
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background:#fff;
+      border:1px solid #ccc;
+      padding:1rem;
+      border-radius:6px;
+      max-height:80vh;
+      overflow:auto;
+    }
+    input[type=file] { margin:1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Upload HTML → View Source</h1>
+  <input type="file" id="fileInput" accept=".html,.htm" />
+  <pre id="output">No file loaded</pre>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const output = document.getElementById("output");
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        output.textContent = e.target.result; // show raw HTML source
+      };
+      reader.readAsText(file);
+    });
+  </script>
+</body>
+</html>
