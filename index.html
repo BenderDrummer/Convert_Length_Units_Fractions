@@ -1,1 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Length Converter</title>
+<style>
+body { margin:0; padding:0; height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; background:#f5f5f5; }
+#input, #output { width:90%; max-width:720px; box-sizing:border-box; } /* Unified width for input/output */
+#input { font-size:clamp(1.4rem,6vw,2rem); padding:.5em; border:2px solid #ddd; border-radius:8px; text-align:center; outline:none; transition:border-color .3s; background:#fff; }
+#input:focus { border-color:#007bff; }
+.row { display:flex; gap:.75rem; margin:.8rem 0; align-items:center; flex-wrap:wrap; justify-content:center; }
+select, input[type="number"]{ font-size:1rem; padding:.5em .6em; border:2px solid #ddd; border-radius:8px; background:#fff; outline:none; }
+#dpiWrap { display:none; align-items:center; gap:.5rem; }
+#dpiWrap label{ font-size:.9rem; color:#444; }
+#output { font-size:clamp(1.8rem,7vw,2.5rem); font-weight:700; color:#333; text-align:center; min-height:1.2em; padding:.3em .6em; background:#fff; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,.1); display:flex; align-items:center; justify-content:center; }
+.copied-message { position:fixed; top:20px; right:20px; background:#28a745; color:#fff; padding:10px 20px; border-radius:5px; font-size:14px; opacity:0; transition:opacity .3s; }
+.copied-message.show { opacity:1; }
 
+@media (max-width: 600px) {
+body { padding: 10px; }
+#input, #output {
+width: 95%; /* Slightly wider on smaller screens */
+padding: 0.7em; /* More padding */
+}
+#input {
+font-size: clamp(1.2rem, 5vw, 1.8rem); /* Slightly smaller font on very small screens */
+}
+#output {
+font-size: clamp(1.6rem, 6vw, 2.2rem);
+}
+.row {
+flex-direction: column;
+gap: 0.5rem;
+}
+select, input[type="number"] {
+width: 95%; /* Make select and DPI input full width */
+box-sizing: border-box;
+}
+#copyButton { display:block; }
+}
+</style>
+</head>
+<body>
+<form id="calc" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:.8rem;">
+<input id="input" type="text" enterkeyhint="go" placeholder="Number with units or calc" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+<div class="row">
+<select id="outUnit" aria-label="Output unit">
+<option value="arch">ft′-in″ (architectural, 1/16)</option>
+<option value="in">inches (decimal)</option>
+<option value="ft">feet (decimal)</option>
+<option value="cm">cm</option>
+<option value="mm">mm</option>
+<option value="m">meters</option>
+<option value="km">kilometers</option>
+<option value="mi">miles</option>
+<option value="league">leagues</option>
+<option value="au">AU</option>
+<option value="nm">nautical miles</option>
+<option value="parsec">parsecs</option>
+<option value="px">pixels (at DPI)</option>
+<option value="pt">points</option>
+<option value="pica">picas</option>
+</select>
+
+<span id="dpiWrap" class="row">
+<label for="dpi">DPI</label>
+<input id="dpi" type="number" step="1" min="1" value="96" style="width:6rem; text-align:center;">
+</span>
+</div>
+
+<div id="output" title=""></div>
+<button id="copyButton" style="display:none; padding:10px 20px; font-size:1rem; cursor:pointer;">Enter & Copy</button>
+<div id="copiedMessage" class="copied-message">Copied to clipboard!</div>
+
+<script>
+const inputEl = document.getElementById('input');
+const outEl = document.getElementById('output');
+const outUnitSel = document.getElementById('outUnit');
+const dpiWrap = document.getElementById('dpiWrap');
+const dpiEl = document.getElementById('dpi');
+const copiedMsg = document.getElementById('copiedMessage');
+const form = document.getElementById('calc');
+const copyButton = document.getElementById('copyButton');
+
+// --- constants ---
+const IN_PER_M = 39.37007874015748;        // exact by definition
+const IN_PER_CM = 0.3937007874015748;
+const IN_PER_MM = 0.03937007874015748;
+const IN_PER_KM = IN_PER_M * 1000;
+const IN_PER_MI = 63360;                   // statute mile
+const IN_PER_LEAGUE = IN_PER_MI * 3;       // 3 miles per (statute) league
+const IN_PER_AU = IN_PER_M * 149_597_870_700; // IAU 2012 (m)
+const IN_PER_PARSEC = IN_PER_M * 3.0856775814913673e16; // m
+const IN_PER_NM = 72913.38582677165; // 1 nautical mile = 1852 meters = 72913.38582677165 inches
+const IN_PER_PT = 1/72;                    // PostScript point
+const IN_PER_PICA = 1/6;                   // 12 pt
+
+// --- unit normalization ---
+// Map normalized unit key -> converter function inches(value, context)
+function inchesFromUnit(val, u){
+const dpi = Number(dpiEl.value) || 96;
+switch(u){
+case 'in': case '"': case 'inch': case 'inches': return val;
+case 'ft': case "'": case 'foot': case 'feet': return val * 12;
+case 'm': case 'meter': case 'metre': case 'meters': case 'metres': return val * IN_PER_M;
+case 'cm': case 'centimeter': case 'centimetre': case 'centimeters': case 'centimetres': return val * IN_PER_CM;
+case 'mm': case 'millimeter': case 'millimetre': case 'millimeters': case 'millimetres': return val * IN_PER_MM;
+case 'km': case 'kilometer': case 'kilometre': case 'kilometers': case 'kilometres': return val * IN_PER_KM;
+case 'mi': case 'mile': case 'miles': return val * IN_PER_MI;
+case 'league': case 'leagues': return val * IN_PER_LEAGUE;
+case 'au': case 'astronomicalunit': case 'astronomicalunits': return val * IN_PER_AU;
+case 'parsec': case 'parsecs': return val * IN_PER_PARSEC;
+case 'nm': case 'nauticalmile': case 'nauticalmiles': return val * IN_PER_NM; // Nautical Miles
+case 'px': case 'pixel': case 'pixels': return val / dpi; // px -> inches using DPI
+case 'pt': case 'point': case 'points': return val * IN_PER_PT;
+case 'pica': case 'picas': return val * IN_PER_PICA;
+case 'nanometer': case 'nanometre': case 'nanometers': case 'nanometres': return val / 25_400_000; // 25.4e6 nm
+case 'um': case 'µm': case 'μm': case 'micron': case 'microns': case 'micrometer': case 'micrometre': case 'micrometers': case 'micrometres':
+return val / 25_400; // 25.4e3 um
+default: return NaN;
+}
+}
+// Build a regex for units we accept after numbers (letters/symbols)
+
+const unitAlternatives = [
+'"','in','inch','inches','"','ft','foot','feet','m','meter','metre','meters','metres','cm','centimeter','centimetre','centimeters','centimetres','mm','millimeter','millimetre','millimeters','millimetres','km','kilometer','kilometre','kilometers','kilometres','mi','mile','miles','league','leagues','au','astronomicalunit','astronomicalunits','parsec','parsecs','nm','nauticalmile','nauticalmiles','px','pixel','pixels','pt','point','points','pica','picas','nanometer','nanometre','nanometers','nanometres','um','µm','μm','micron','microns','micrometer','micrometre','micrometers','micrometres'
+];
+const unitPattern = unitAlternatives
+.map(u=>u.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))
+.sort((a,b)=>b.length-a.length) // longer first
+.join('|');
+// --- helpers ---
+function normalizeQuotes(s){
+return s
+.replace(/[\u2032\u2019]/g, "'")  // prime/right single quote -> '
+
+.replace(/[\u2033\u201D]/g, '"');   // double prime/right double quote -> "
+}
+function matchFeetInches(s, i){
+const sub = s.slice(i);
+const re = new RegExp("^\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*(?:'|ft)\\s*(?:(\\d+(?:\\.\\d+)?)\\s*(?:\\\"|in)?)?","i");
+const m = sub.match(re);
+
+if(!m) return null;
+const feet = parseFloat(m[1]);
+const inches = m[2] !== undefined ? parseFloat(m[2]) : 0;
+const consumed = m[0].length;
+const inchesTotal = Math.abs(feet) * 12 + inches;
+return { consumed, value: feet < 0 ? -inchesTotal : inchesTotal };
+}
+function tokenize(expr){
+const s = normalizeQuotes(expr).replace(/[,_]/g,'');
+const tokens = [];
+let i = 0; let lastType = 'start';
+const unknownUnits = new Set();
+while (i < s.length){
+const ch = s[i];
+
+if(/\s/.test(ch)){ i++; continue; }
+if (ch === '(' || ch === ')'){ tokens.push({type:'paren', value:ch}); lastType='paren'; i++; continue; }
+if(/[+\-*/]/.test(ch)){
+if(ch==='-' && (lastType==='op' || lastType==='paren' || lastType==='start')) tokens.push({type:'op', value:'~'}); else tokens.push({type:'op', value:ch});
+lastType='op'; i++; continue;
+
+}
+const combo = matchFeetInches(s, i);
+if(combo){ tokens.push({type:'val', value: combo.value}); i += combo.consumed; lastType='val'; continue; }
+// number with unit
+const numRe = new RegExp(`^([+-]?\\d+(?:\\.\\d+)?)(?:\\s*(${unitPattern}))?`, 'i');
+const sub = s.slice(i);
+const m = sub.match(numRe);
+if(m){
+const n = parseFloat(m[1]);
+const unit = (m[2]||'').toLowerCase();
+if(unit){
+
+const inches = inchesFromUnit(n, unit);
+if(Number.isNaN(inches)){
+
+unknownUnits.add(unit);
+} else {
+tokens.push({type:'val', value: inches});
+i += m[0].length; lastType='val'; continue;
+}
+} else { // bare number -> inches by default
+tokens.push({type:'val', value: n});
+i += m[0].length; lastType='val'; continue;
+}
+}
+// Try to catch stray unit words to flag as unknown
+const word = s.slice(i).match(/^[A-Za-zµμ]+/);
+if(word){ unknownUnits.add(word[0].toLowerCase()); i += word[0].length; continue; }
+// otherwise skip this character (safety)
+i++;
+}
+// implicit multiplication between val and '(' / ')' and val-val
+const withImplicit = [];
+for(let k=0;k<tokens.length;k++){
+const t = tokens[k];
+const prev = withImplicit[withImplicit.length-1];
+if(prev && ((prev.type==='val' || (prev.type==='paren' && prev.value===')')) && (t.type==='paren' && t.value==='('))) withImplicit.push({type:'op', value:'*'});
+
+else if(prev && (prev.type==='val' && t.type==='val')) withImplicit.push({type:'op', value:'*'});
+else if(prev && (prev.type==='paren' && prev.value===')') && t.type==='val') withImplicit.push({type:'op', value:'*'});
+withImplicit.push(t);
+}
+
+return { tokens: withImplicit, unknown: Array.from(unknownUnits) };
+}
+function toRPN(tokens){
+
+const out=[]; const ops=[]; const prec={'+':1,'-':1,'*':2,'/':2,'~':3}; const rightAssoc={'~':true};
+for(const t of tokens){
+if(t.type==='val') out.push(t);
+else if(t.type==='op'){
+while(ops.length){ const top=ops[ops.length-1]; if(top.type==='op' && ((rightAssoc[t.value]?prec[t.value]<prec[top.value]:prec[t.value]<=prec[top.value]))) out.push(ops.pop()); else break; }
+ops.push(t);
+} else if(t.type==='paren' && t.value==='(') ops.push(t);
+else if(t.type==='paren' && t.value===')'){ while(ops.length && !(ops[ops.length-1].type==='paren' && ops[ops.length-1].value==='(')) out.push(ops.pop()); if(ops.length && ops[ops.length-1].value==='(') ops.pop(); }
+}
+while(ops.length) out.push(ops.pop());
+return out;
+
+}
+function evalRPN(rpn){ const st=[]; for(const t of rpn){ if(t.type==='val') st.push(t.value); else if(t.type==='op'){ if(t.value==='~'){ st.push(-st.pop()); continue; } const b=st.pop(); const a=st.pop(); switch(t.value){ case '+': st.push(a+b); break; case '-': st.push(a-b); break; case '*': st.push(a*b); break; case '/': st.push(a/b); break; } } } return st.pop() ?? NaN; }
+
+function setUnknownTooltip(unknownUnits){ /* Implement tooltip logic if needed */ }
+function evaluateToInches(expr){ const {tokens, unknown} = tokenize(expr); setUnknownTooltip(unknown); if(!tokens.length) return NaN; const rpn=toRPN(tokens); return evalRPN(rpn); }
+function gcd(a,b){ a=Math.abs(a); b=Math.abs(b); while(b){ const t=b; b=a%b; a=t; } return a||1; }
+function formatArchitectural(inches){
+const sign = inches < 0 ? -1 : 1; const absIn = Math.abs(inches);
+let feet = Math.floor(absIn / 12); let rem = absIn - feet*12;
+const wholeIn = Math.floor(rem + 1e-9); let sixteenths = Math.round((rem - wholeIn) * 16 + 1e-9);
+let inchesWhole = wholeIn;
+if(sixteenths===16){ inchesWhole += 1; sixteenths = 0; }
+if(inchesWhole===12){ feet += 1; inchesWhole = 0; }
+// simplify fraction
+let fracStr = '';
+if(sixteenths){ const d = 16 / gcd(16, sixteenths); const n = sixteenths / gcd(16, sixteenths); fracStr = `${n}/${d}`; }
+
+const signStr = sign<0?'-':'';
+
+if(inchesWhole===0 && !fracStr){ return `${signStr}${feet}\u2032`; } // feet only
+
+const inchPart = fracStr ? (inchesWhole? `${inchesWhole} ${fracStr}\u2033` : `${fracStr}\u2033`) : `${inchesWhole}\u2033`;
+
+return `${signStr}${feet}\u2032-${inchPart}`;
+}
+
+function formatDecimal(inches, unit){
+let v = 0; const dpi = Number(dpiEl.value) || 96;
+switch(unit){
+case 'in': v = inches; break;
+case 'ft': v = inches/12; break;
+case 'cm': v = inches/IN_PER_CM; break;
+case 'mm': v = inches/IN_PER_MM; break;
+case 'm': v = inches/IN_PER_M; break;
+case 'km': v = inches/IN_PER_KM; break;
+case 'mi': v = inches/IN_PER_MI; break;
+case 'league': v = inches/IN_PER_LEAGUE; break;
+case 'au': v = inches/IN_PER_AU; break;
+case 'parsec': v = inches/IN_PER_PARSEC; break;
+case 'nm': v = inches/IN_PER_NM; break; // Nautical Miles
+case 'px': v = inches * dpi; break;
+
+case 'pt': v = inches / IN_PER_PT; break;
+case 'pica': v = inches / IN_PER_PICA; break;
+default: v = inches; break;
+}
+const fixed = Math.abs(v) < 1e10 ? v.toFixed(2) : v.toString();
+const suffix = unit === 'px' ? ' px' : (unit === 'pt' ? ' pt' : (unit === 'pica' ? ' pica' : ` ${unit}`));
+return `${fixed}${suffix}`;
+}
+async function copyToClipboard(text){
+try {
+if(navigator.clipboard && window.isSecureContext){
+await navigator.clipboard.writeText(text);
+} else {
+const ta=document.createElement('textarea');
+ta.value=text; ta.setAttribute('readonly','');
+ta.style.position='fixed'; ta.style.opacity='0';
+document.body.appendChild(ta); ta.select();
+document.execCommand('copy'); ta.remove();
+}
+copiedMsg.classList.add('show');
+setTimeout(()=>copiedMsg.classList.remove('show'),1600);
+} catch(e){}
+}
+function compute(shouldCopy = false){
+
+const inches = evaluateToInches(inputEl.value);
+if(Number.isFinite(inches)){
+let formattedOutput = '';
+const selectedUnit = outUnitSel.value;
+if (selectedUnit === 'arch') {
+formattedOutput = formatArchitectural(inches);
+} else {
+formattedOutput = formatDecimal(inches, selectedUnit);
+}
+outEl.textContent = formattedOutput;
+outEl.title = formattedOutput; // Set title for easy copying
+if (shouldCopy) copyToClipboard(formattedOutput);
+} else {
+outEl.textContent = '';
+outEl.title = '';
+
+}
+}
+form.addEventListener('submit', e => { e.preventDefault(); compute(true); });
+inputEl.addEventListener('input', ()=> compute(false));
+inputEl.addEventListener('paste', ()=> setTimeout(()=>compute(false),0));
+outUnitSel.addEventListener('change', ()=> compute(false));
+dpiEl.addEventListener('input', ()=> compute(false));
+copyButton.addEventListener('click', async (e) => {
+e.preventDefault();
+compute(true);
+});
+</script>
+</body>
+</html>
